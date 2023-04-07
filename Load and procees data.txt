@@ -1,0 +1,112 @@
+
+# We will be using a public 10X Genomics scRNA-Seq dataset in PBMC cells
+# You can read more 10X public datasets: https://www.10xgenomics.com/resources/datasets/
+###Load Libraries
+
+library(Seurat)
+library(tidyverse)
+library(ggpubr)
+library(Matrix)
+
+## load hdf5r library also 
+
+# Load the NSCLC dataset
+
+getwd()
+setwd('C:/komalr')
+nsclc.mat <- Read10X_h5(filename = '40k_NSCLC_DTC_3p_HT_nextgem_Multiplex_count_raw_feature_bc_matrix.h5')
+#to get gene expresion data in nsclc.mat
+cts = nsclc.mat$`Gene Expression`
+# Initialize the Seurat object with the raw (non-normalized data).
+nsclc <- CreateSeuratObject(counts = cts, project = "NSCLC" )
+
+
+## Step #2: Examine QC metrics ##
+# Compare with online summary: https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_web_summary.html
+
+# Get the quality info from meta.data
+View(nsclc@meta.data)
+# Add in the Mitochondrial PCT% information
+nsclc$percent.mt <- PercentageFeatureSet(nsclc, pattern = "^MT-")
+
+# nCount_RNA is the number of UMI counts in a cell
+hist(nsclc$nCount_RNA)
+# nFeature_RNA is the number of different genes that had any reads
+hist(nsclc$nFeature_RNA)
+
+# percent.mt is the percent mitochondrial reads
+hist(nsclc$percent.mt)
+# Make a violin plot of the QC columns
+
+VlnPlot(nsclc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3) 
+####ggsave(filename = "QC.png", plot = graphhh, width = 7, height = 3.5)
+
+# Make scatter plots to compare
+plot1 <- FeatureScatter(nsclc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot1
+plot2 <- FeatureScatter(nsclc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot2
+
+
+# Subset to remove outlier
+dim(nsclc)
+nsclc <- subset(nsclc, subset = nFeature_RNA > 200 &
+                 nFeature_RNA < 2500 & percent.mt < 5)
+dim(pbmc)
+
+
+# How many cells did you filter out?
+
+## Step #3: Normalize and Scale the data ##
+
+# Log-transform the counts
+nsclc <- NormalizeData(nsclc)
+
+# Find Variable Features
+nsclc <- FindVariableFeatures(nsclc)
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(nsclc), 10)
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(nsclc)
+plot1 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1
+
+# Scale the data
+nsclc1 <- ScaleData(nsclc)
+
+
+# Compare the raw, log, and scaled count distributions
+data.frame(
+  counts = c(
+    nsclc1@assays$RNA@counts[,'AAACATACAACCAC-1'],
+    nsclc1@assays$RNA@counts[,'AAACATTGAGCTAC-1'],
+    nsclc1@assays$RNA@data[,'AAACATACAACCAC-1'],
+    nsclc1@assays$RNA@data[,'AAACATTGAGCTAC-1'],
+    nsclc1@assays$RNA@scale.data[,'AAACATACAACCAC-1'],
+    nsclc1@assays$RNA@scale.data[,'AAACATTGAGCTAC-1']
+  ),
+  cell = c(rep(rep(c('AAACATACAACCAC-1', 'AAACATTGAGCTAC-1'),
+                   each = length(rownames(pbmc@assays$RNA@counts))), 2),
+           rep(c('AAACATACAACCAC-1', 'AAACATTGAGCTAC-1'),
+               each = length(rownames(pbmc@assays$RNA@scale.data)))),
+  type = factor(c(rep(c("Raw", "Log(x+1)"),
+                      each = 2*length(rownames(pbmc@assays$RNA@counts))),
+                  rep("Scaled", 2*length(rownames(pbmc@assays$RNA@scale.data)))),
+                levels = c("Raw", "Log(x+1)", "Scaled"))
+) %>% 
+  ggplot(aes(x = cell, y = counts)) +
+  geom_boxplot() +
+  theme_bw() +
+  rotate_x_text(45) +
+  facet_wrap(facets = "type", scales = "free_y")
+# Run PCA
+nsclc1 <- RunPCA(nsclc1)
+
+# Plot the PCA
+DimPlot(nsclc1, reduction = "pca")
+
+# Plot the loadings
+VizDimLoadings(nsclc1, dims = 1:2, reduction = "pca")
+
+# Choose the number of principle components to keep
+ElbowPlot(nsclc1)
